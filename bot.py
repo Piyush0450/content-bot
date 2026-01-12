@@ -31,7 +31,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
     logging.error("BOT_TOKEN not found in environment variables.")
-    print("Error: BOT_TOKEN not found. Make sure .env file exists and contains BOT_TOKEN.")
+    print("Error: BOT_TOKEN not found. Make sure the BOT_TOKEN environment variable is set in your Render Dashboard (or .env file locally).")
     exit(1) 
 
 bot = telebot.TeleBot(BOT_TOKEN)

@@ -1,7 +1,20 @@
 import telebot
 import os
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Add ffmpeg to PATH manually if on Windows and path exists
+if os.name == 'nt':
+    FFMPEG_PATH = r"C:\Users\admin\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin"
+    if os.path.exists(FFMPEG_PATH):
+        os.environ["PATH"] += os.pathsep + FFMPEG_PATH
+    else:
+        logging.warning(f"ffmpeg not found at {FFMPEG_PATH}")
+
 from downloader import download_video
+from utils import split_video
 
 import logging
 
@@ -14,14 +27,22 @@ logging.basicConfig(
 
 # --- CONFIGURATION ---
 # Get this from @BotFather
-BOT_TOKEN = "6500080341:AAGbjqDMAjUgBRWZ_KYW0jFGAdyoSMAYiyY" 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    logging.error("BOT_TOKEN not found in environment variables.")
+    print("Error: BOT_TOKEN not found. Make sure .env file exists and contains BOT_TOKEN.")
+    exit(1) 
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     logging.info(f"Received start command from {message.from_user.username}")
-    bot.reply_to(message, "Hello! Send me a link from TikTok, Instagram, Facebook, or YouTube, and I'll try to download it for you.")
+    try:
+        bot.reply_to(message, "Hello! Send me a link from TikTok, Instagram, Facebook, or YouTube, and I'll try to download it for you.")
+    except Exception as e:
+        logging.error(f"Error sending welcome message: {e}")
 
 @bot.message_handler(func=lambda message: True) # Catch all text messages
 def handle_message(message):
@@ -31,10 +52,16 @@ def handle_message(message):
     # Basic validation (naive)
     if not url.startswith("http"):
         logging.warning("Invalid URL received")
-        bot.reply_to(message, "That doesn't look like a valid link. Please send a URL starting with http/https.")
+        try:
+            bot.reply_to(message, "That doesn't look like a valid link. Please send a URL starting with http/https.")
+        except Exception as e:
+            logging.error(f"Error sending invalid URL message: {e}")
         return
 
-    bot.reply_to(message, "Downloading... Please wait. ⏳")
+    try:
+        bot.reply_to(message, "Downloading... Please wait. ⏳")
+    except Exception as e:
+        logging.error(f"Error sending downloading message: {e}")
     logging.info(f"Processing URL: {url}")
     
     # Download
@@ -57,17 +84,39 @@ def handle_message(message):
                 logging.info(f"File size: {file_size}MB, Ext: {file_ext}")
 
                 if file_size > 50:
-                    logging.warning(f"File too large: {file_size}MB")
-                    bot.reply_to(message, f"File {os.path.basename(file_path)} is too large ({file_size:.2f}MB). 😔")
-                    continue
+                    logging.info(f"File {file_path} is larger than 50MB ({file_size:.2f}MB). Splitting...")
+                    bot.reply_to(message, f"File is large ({file_size:.2f}MB). Splitting into parts... 🔪")
+                    
+                    try:
+                        parts = split_video(file_path, max_size_mb=49)
+                        if not parts:
+                             bot.reply_to(message, "Failed to split video. 😔")
+                             continue
+                             
+                        for i, part_path in enumerate(parts):
+                             logging.info(f"Sending part {i+1}/{len(parts)}: {part_path}")
+                             with open(part_path, 'rb') as part_file:
+                                 bot.send_video(message.chat.id, part_file, caption=f"Part {i+1} of {len(parts)} 📦", timeout=600)
+                             
+                             # Clean up part
+                             try:
+                                 os.remove(part_path)
+                             except:
+                                 pass
+                    except Exception as e:
+                        logging.error(f"Error splitting/sending parts: {e}")
+                        bot.reply_to(message, f"Error processing large file: {e}")
 
-                with open(file_path, 'rb') as file_obj:
-                    if file_ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.heic']:
-                        logging.info("Sending as photo...")
-                        bot.send_photo(message.chat.id, file_obj, caption="📸")
-                    else:
-                        logging.info("Sending as video...")
-                        bot.send_video(message.chat.id, file_obj, caption="🎥", timeout=120)
+                else:
+                    # Send normally if <= 50MB
+                    with open(file_path, 'rb') as file_obj:
+                        if file_ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.heic']:
+                            logging.info("Sending as photo...")
+                            bot.send_photo(message.chat.id, file_obj, caption="📸")
+                        else:
+                            logging.info("Sending as video...")
+                            bot.send_video(message.chat.id, file_obj, caption="🎥", timeout=600)
+                
                 logging.info("Sent successfully.")
             except Exception as e:
                 logging.error(f"Error sending {file_path}: {e}")
@@ -85,6 +134,6 @@ def handle_message(message):
 if __name__ == "__main__":
     print("Bot is running...")
     try:
-        bot.infinity_polling()
+        bot.infinity_polling(skip_pending=True)
     except Exception as e:
         print(f"Bot stopped: {e}")

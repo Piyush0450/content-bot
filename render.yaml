@@ -1,0 +1,10 @@
+services:
+  - type: worker
+    name: content-bot
+    env: docker
+    region: singapore
+    plan: free
+    dockerCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
